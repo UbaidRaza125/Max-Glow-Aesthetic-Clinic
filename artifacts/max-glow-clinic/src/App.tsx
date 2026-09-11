@@ -7,6 +7,7 @@ import {
   Trash2, UsersRound, X
 } from 'lucide-react';
 import { AppointmentWidget } from '@/components/AppointmentWidget';
+import { saveFirebaseAppointment, subscribeToFirebaseAppointments } from '@/lib/firebase';
 import './index.css';
 
 const ASSET = `${import.meta.env.BASE_URL}assets/`;
@@ -210,10 +211,15 @@ function ControlPanel({ user, title, onLogout }: { user: string; title: string; 
   useEffect(() => writeStore('maxglow_jobs', jobs), [jobs]);
   useEffect(() => writeStore('maxglow_threads', threads), [threads]);
   useEffect(() => {
-    fetchAppointments().then((items) => {
+    const loadFromApi = () => fetchAppointments().then((items) => {
       setAppointments(items);
       writeStore('maxglow_appointments', items);
     }).catch(() => { });
+    const unsubscribe = subscribeToFirebaseAppointments((items) => {
+      setAppointments(items);
+      writeStore('maxglow_appointments', items);
+    }, loadFromApi);
+    return unsubscribe;
   }, []);
   useEffect(() => {
     let lastValue = localStorage.getItem('maxglow_threads');
@@ -294,15 +300,19 @@ function App() {
   const saveAppointment = async (appointment: Appointment) => {
     let savedAppointment = appointment;
     try {
-      const response = await fetch(APPOINTMENTS_API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(appointment),
-      });
-      if (!response.ok) throw new Error('Unable to save appointment');
-      savedAppointment = await response.json() as Appointment;
+      await saveFirebaseAppointment(appointment);
     } catch {
-      writeStore('maxglow_appointments', [appointment, ...readStore<Appointment[]>('maxglow_appointments', [])]);
+      try {
+        const response = await fetch(APPOINTMENTS_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(appointment),
+        });
+        if (!response.ok) throw new Error('Unable to save appointment');
+        savedAppointment = await response.json() as Appointment;
+      } catch {
+        writeStore('maxglow_appointments', [appointment, ...readStore<Appointment[]>('maxglow_appointments', [])]);
+      }
     }
     setAppointments(prev => [savedAppointment, ...prev]);
     setBookingOpen(false);
