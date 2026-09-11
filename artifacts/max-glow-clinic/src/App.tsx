@@ -16,6 +16,13 @@ const address = 'Shop No 1 Lower Ground Floor, Northern Heights E-11/3 Markaz, M
 const whatsapp = `https://wa.me/92${phone.slice(1)}`;
 
 type Appointment = { id: string; name: string; phone: string; date: string; message: string; treatment: string; createdAt: string };
+const APPOINTMENTS_API = '/api/appointments';
+
+async function fetchAppointments(): Promise<Appointment[]> {
+  const response = await fetch(APPOINTMENTS_API);
+  if (!response.ok) throw new Error('Unable to load appointments');
+  return response.json() as Promise<Appointment[]>;
+}
 type Job = { id: string; title: string; type: string; location: string; description: string; endDate: string };
 type ChatMessage = { id: string; text: string; from: 'patient' | 'staff'; at: string };
 type ChatThread = { id: string; name: string; phone: string; messages: ChatMessage[] };
@@ -194,7 +201,7 @@ function StaffLogin({ onLogin }: { onLogin: (user: string, title: string) => voi
 
 function ControlPanel({ user, title, onLogout }: { user: string; title: string; onLogout: () => void }) {
   const [tab, setTab] = useState<'overview' | 'appointments' | 'jobs' | 'inbox'>('overview');
-  const [appointments] = useState<Appointment[]>(() => readStore('maxglow_appointments', []));
+  const [appointments, setAppointments] = useState<Appointment[]>(() => readStore('maxglow_appointments', []));
   const [jobs, setJobs] = useState<Job[]>(() => readStore('maxglow_jobs', seedJobs));
   const [threads, setThreads] = useState<ChatThread[]>(() => readStore('maxglow_threads', [seedThread]));
   const [showJobForm, setShowJobForm] = useState(false);
@@ -202,6 +209,12 @@ function ControlPanel({ user, title, onLogout }: { user: string; title: string; 
   const [selectedThread, setSelectedThread] = useState(threads[0]?.id || '');
   useEffect(() => writeStore('maxglow_jobs', jobs), [jobs]);
   useEffect(() => writeStore('maxglow_threads', threads), [threads]);
+  useEffect(() => {
+    fetchAppointments().then((items) => {
+      setAppointments(items);
+      writeStore('maxglow_appointments', items);
+    }).catch(() => { });
+  }, []);
   useEffect(() => {
     let lastValue = localStorage.getItem('maxglow_threads');
     const applyValue = (value: string | null) => {
@@ -278,10 +291,22 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [toast]);
   const publicPage = location !== '/control-pannel';
-  const saveAppointment = (appointment: Appointment) => {
-    setAppointments(prev => [appointment, ...prev]);
+  const saveAppointment = async (appointment: Appointment) => {
+    let savedAppointment = appointment;
+    try {
+      const response = await fetch(APPOINTMENTS_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(appointment),
+      });
+      if (!response.ok) throw new Error('Unable to save appointment');
+      savedAppointment = await response.json() as Appointment;
+    } catch {
+      writeStore('maxglow_appointments', [appointment, ...readStore<Appointment[]>('maxglow_appointments', [])]);
+    }
+    setAppointments(prev => [savedAppointment, ...prev]);
     setBookingOpen(false);
-    setToast(`Thank you, ${appointment.name}. We’ll review your request for ${prettyDate(appointment.date)} and get back to you.`);
+    setToast(`Thank you, ${savedAppointment.name}. We’ll review your request for ${prettyDate(savedAppointment.date)} and get back to you.`);
   };
   const shell = (page: ReactNode) => <>{publicPage && <SiteHeader onBook={() => setBookingOpen(true)} />}{page}{publicPage && <Footer onBook={() => setBookingOpen(true)} />}{publicPage && <ChatWidget threads={threads} setThreads={setThreads} />}{toast && <div className="site-toast" role="status" aria-live="polite"><CheckCircle2 size={18} /><span>{toast}</span><button onClick={() => setToast(null)} aria-label="Dismiss notification"><X size={14} /></button></div>}<BookingModal open={bookingOpen} onClose={() => setBookingOpen(false)} onSaved={saveAppointment} /></>;
   return <Switch>{<Route path="/our-story">{shell(<Story />)}</Route>}<Route path="/contact">{shell(<Contact onBook={() => setBookingOpen(true)} />)}</Route><Route path="/careers">{shell(<Careers />)}</Route><Route path="/control-pannel">{staff ? <ControlPanel user={staff.user} title={staff.title} onLogout={() => { setStaff(null); localStorage.removeItem('maxglow_staff'); setLocation('/'); }} /> : <StaffLogin onLogin={(user, title) => { setStaff({ user, title }); writeStore('maxglow_staff', { user, title }); }} />}</Route><Route path="/">{shell(<Home onBook={() => setBookingOpen(true)} />)}</Route><Route><div className="page-hero"><div className="container"><div className="eyebrow">404 · Page not found</div><h1>Let’s take you<br /><em>back to glow.</em></h1><Link className="btn btn-primary" href="/" data-testid="link-404-home">Back home <ArrowUpRight size={14} /></Link></div></div></Route></Switch>;
